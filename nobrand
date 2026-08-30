@@ -329,14 +329,14 @@ load_state() {
 }
 
 mieru_uri() {
-  printf 'mierus://%s:%s@%s:%s/?transport=TCP&mtu=1400&multiplexing=MULTIPLEXING_OFF#%s\n' \
+  printf 'mieru://%s:%s@%s:%s/?transport=TCP&mtu=1400&multiplexing=MULTIPLEXING_OFF#%s\n' \
     "$PROXY_USER" "$PROXY_PASSWORD" "$ENTRY_HOST" "$ENTRY_PORT" "$NODE_NAME"
 }
 
 print_protocol() {
   cat <<EOF
 
-Mieru 协议链接：
+Mieru 兼容协议链接：
 $(mieru_uri)
 
 通用 YAML 配置：
@@ -512,4 +512,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

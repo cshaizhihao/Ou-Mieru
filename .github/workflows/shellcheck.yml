@@ -16,3 +16,5 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - name: Run ShellCheck
         run: shellcheck --shell=bash nobrand
+      - name: Test protocol output
+        run: bash tests/test-protocol-output.sh
