@@ -25,6 +25,10 @@ PROXY_USER=''
 PROXY_PASSWORD=''
 DRY_RUN=0
 TUNING_BACKUP=''
+DETECTED_DEFAULT_IFACE=''
+DETECTED_PUBLIC_IP=''
+DETECTED_PRIVATE_INTERFACES=''
+NETWORK_DETECTED=0
 
 banner() {
   cat <<'EOF'
@@ -166,6 +170,10 @@ detect_network() {
   default_iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
   public_ip="$(ip -4 -o addr show dev "$default_iface" scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
   private_ifaces="$(ip -4 -o addr show scope global 2>/dev/null | awk -v d="$default_iface" '$2 != d {print $2}' | sort -u | tr '\n' ' ')"
+  DETECTED_DEFAULT_IFACE="$default_iface"
+  DETECTED_PUBLIC_IP="$public_ip"
+  DETECTED_PRIVATE_INTERFACES="$private_ifaces"
+  NETWORK_DETECTED=1
 
   say "Detected public egress interface: ${default_iface:-unknown} (${public_ip:-unknown})"
   [[ -z "$private_ifaces" ]] || say "Additional IPv4 interface(s): ${private_ifaces% }"
@@ -294,7 +302,7 @@ mieru_uri() {
 print_protocol() {
   cat <<EOF
 
-MMWX-compatible Mieru URI:
+Mieru URI:
 $(mieru_uri)
 
 Clash / mihomo YAML:
@@ -332,7 +340,7 @@ run_install() {
   parse_install_args "$@"
   require_root
   validate_host
-  detect_network
+  ((NETWORK_DETECTED)) || detect_network
   check_port
   check_shortcut_path
 
@@ -409,10 +417,35 @@ run_uninstall() {
 interactive_install() {
   local port entry_host entry_port node_name
   local -a install_args
-  read -r -p 'Mieru listening port (for example 20101): ' port
-  read -r -p 'Client-facing L4 entry IP/domain: ' entry_host
-  read -r -p 'Client-facing L4 entry port [same as listening port]: ' entry_port
-  read -r -p 'MMWX node name [ou-mieru]: ' node_name
+  detect_network
+  cat <<EOF
+
+请打开服务商控制台的"网络信息"区域，按下面的字段填写：
+
+  脚本已自动识别：
+    日本 VPS 公网 IPv4：${DETECTED_PUBLIC_IP:-未识别}
+    默认网卡：${DETECTED_DEFAULT_IFACE:-未识别}
+    其他 IPv4 网卡：${DETECTED_PRIVATE_INTERFACES:-无}
+
+  需要从面板填写：
+    1. "专线网卡 - 可用端口范围"：从其中选一个未占用端口。
+       不要使用"专线网卡 - SSH端口"。
+    2. "专线网卡 - 移动入口 (China Mobile)"：复制 IP 地址。
+    3. 如果入口端口和第 1 步不同，再填写入口端口；通常直接回车即可。
+EOF
+
+  while :; do
+    read -r -p '第 1 步，填写选择的 Mieru 端口（例如 20101）：' port
+    is_valid_port "$port" && break
+    printf '端口必须是 1025 到 65535 的整数。\n' >&2
+  done
+  while :; do
+    read -r -p '第 2 步，填写“移动入口 (China Mobile)”IP：' entry_host
+    is_safe_host "$entry_host" && break
+    printf '请输入 IPv4 地址或域名，不能包含空格。\n' >&2
+  done
+  read -r -p "第 3 步，填写入口端口 [${port}]：" entry_port
+  read -r -p '节点名称 [ou-mieru]：' node_name
   install_args=(--port "$port" --entry-host "$entry_host")
   [[ -z "$entry_port" ]] || install_args+=(--entry-port "$entry_port")
   [[ -z "$node_name" ]] || install_args+=(--name "$node_name")
