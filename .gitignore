@@ -1,0 +1,4 @@
+# Runtime output and local review material
+*.log
+*.tmp
+.DS_Store

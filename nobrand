@@ -1,0 +1,462 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Ou-Mieru (For Nobrand Dual)
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+
+readonly PROJECT_NAME='Ou-Mieru (For Nobrand Dual)'
+readonly PROJECT_AUTHOR='nodeseek@cshaizhihao'
+readonly INSTALLER_VERSION='v2.2.1'
+readonly INSTALLER_URL="https://raw.githubusercontent.com/ike-sh/mieru-OneClick/${INSTALLER_VERSION}/install-mita.sh"
+readonly INSTALLER_SHA256='f94d22a1ce567a51f0c19128cd79e5b4703e9863d146ea526891540863d70819'
+readonly TUNING_FILE='/etc/sysctl.d/99-ou-mieru-tuning.conf'
+readonly STATE_DIR='/etc/ou-mieru'
+readonly STATE_FILE="${STATE_DIR}/install.env"
+readonly INSTALL_DIR='/usr/local/lib/ou-mieru'
+readonly SHORTCUT_PATH='/usr/local/bin/nobrand'
+readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
+
+PORT=''
+ENTRY_HOST=''
+ENTRY_PORT=''
+NODE_NAME='ou-mieru'
+PROXY_USER=''
+PROXY_PASSWORD=''
+DRY_RUN=0
+TUNING_BACKUP=''
+
+banner() {
+  cat <<'EOF'
+   ____        __  __ _
+  / __ \ _   _|  \/  (_)_ __ _   _
+ | |  | | | | | |\/| | | '__| | | |
+ | |__| | |_| | |  | | | |  | |_| |
+  \____/ \__,_|_|  |_|_|_|   \__,_|
+EOF
+  printf '\n  %s\n  %s\n\n' "$PROJECT_NAME" "Author: $PROJECT_AUTHOR"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  nobrand                         Open the interactive menu.
+  nobrand install --port PORT --entry-host HOST [options]
+  nobrand show                    Show the saved Mieru URI and current status.
+  nobrand uninstall [--yes]       Remove this Mieru deployment.
+
+Install options:
+  --port PORT          Mieru TCP listening port on this VPS. Required.
+  --entry-host HOST    Client-facing L4 entry IP or domain. Required.
+  --entry-port PORT    Client-facing L4 entry port. Defaults to --port.
+  --name NAME          Node name: letters, digits, dot, underscore, hyphen.
+  --user USER          Mieru username. Generated when omitted.
+  --password PASSWORD  Mieru password. Generated when omitted.
+  --dry-run            Validate only; make no host changes.
+  -h, --help           Show this help.
+
+For existing non-interactive users, options starting with --port are treated as
+the install command.
+EOF
+}
+
+say() { printf '[ou-mieru] %s\n' "$*"; }
+warn() { printf '[ou-mieru] WARNING: %s\n' "$*" >&2; }
+die() { printf '[ou-mieru] ERROR: %s\n' "$*" >&2; exit 1; }
+
+cleanup() {
+  if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
+    find "$WORK_DIR" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
+    rmdir "$WORK_DIR" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+require_root() {
+  [[ "${EUID}" -eq 0 ]] || die 'Run this script as root (use sudo).'
+}
+
+is_valid_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( "$1" >= 1025 && "$1" <= 65535 ))
+}
+
+is_safe_token() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+is_safe_host() {
+  [[ "$1" =~ ^[A-Za-z0-9.-]+$ ]]
+}
+
+random_token() {
+  local length="$1"
+  (
+    set +o pipefail
+    tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$length"
+  )
+}
+
+take_value() {
+  local flag="$1"
+  [[ $# -ge 2 && -n "${2:-}" && "${2:-}" != --* ]] || die "$flag requires a value."
+}
+
+parse_install_args() {
+  while (($#)); do
+    case "$1" in
+      --port)
+        take_value "$1" "${2:-}"; PORT="$2"; shift 2 ;;
+      --entry-host)
+        take_value "$1" "${2:-}"; ENTRY_HOST="$2"; shift 2 ;;
+      --entry-port)
+        take_value "$1" "${2:-}"; ENTRY_PORT="$2"; shift 2 ;;
+      --name)
+        take_value "$1" "${2:-}"; NODE_NAME="$2"; shift 2 ;;
+      --user)
+        take_value "$1" "${2:-}"; PROXY_USER="$2"; shift 2 ;;
+      --password)
+        take_value "$1" "${2:-}"; PROXY_PASSWORD="$2"; shift 2 ;;
+      --dry-run)
+        DRY_RUN=1; shift ;;
+      -h|--help)
+        usage; exit 0 ;;
+      *)
+        die "Unknown install option: $1" ;;
+    esac
+  done
+
+  [[ -n "$PORT" ]] || die '--port is required.'
+  [[ -n "$ENTRY_HOST" ]] || die '--entry-host is required.'
+  is_valid_port "$PORT" || die '--port must be between 1025 and 65535.'
+  is_safe_host "$ENTRY_HOST" || die '--entry-host must be an IPv4 address or DNS name.'
+
+  ENTRY_PORT="${ENTRY_PORT:-$PORT}"
+  is_valid_port "$ENTRY_PORT" || die '--entry-port must be between 1025 and 65535.'
+  is_safe_token "$NODE_NAME" || die '--name may contain only letters, digits, dot, underscore, and hyphen.'
+
+  PROXY_USER="${PROXY_USER:-$(random_token 12)}"
+  PROXY_PASSWORD="${PROXY_PASSWORD:-$(random_token 18)}"
+  is_safe_token "$PROXY_USER" || die '--user contains unsupported characters.'
+  is_safe_token "$PROXY_PASSWORD" || die '--password contains unsupported characters.'
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+}
+
+validate_host() {
+  [[ -r /etc/os-release ]] || die 'Unable to identify the operating system.'
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case "${ID:-}" in
+    debian|ubuntu) ;;
+    *) die "Unsupported OS: ${PRETTY_NAME:-unknown}. This script supports Debian and Ubuntu." ;;
+  esac
+
+  require_command curl
+  require_command sha256sum
+  require_command ip
+  require_command tc
+  require_command sysctl
+  require_command ss
+}
+
+detect_network() {
+  local default_iface public_ip private_ifaces
+  default_iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+  public_ip="$(ip -4 -o addr show dev "$default_iface" scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
+  private_ifaces="$(ip -4 -o addr show scope global 2>/dev/null | awk -v d="$default_iface" '$2 != d {print $2}' | sort -u | tr '\n' ' ')"
+
+  say "Detected public egress interface: ${default_iface:-unknown} (${public_ip:-unknown})"
+  [[ -z "$private_ifaces" ]] || say "Additional IPv4 interface(s): ${private_ifaces% }"
+}
+
+check_port() {
+  if ss -H -lnt "sport = :$PORT" | grep -q .; then
+    die "TCP port $PORT is already in use. Select another provider-approved forwarding port."
+  fi
+}
+
+install_mieru() {
+  [[ ! -x /usr/local/bin/install-mita ]] || die 'Mieru OneClick is already installed. Use nobrand show or nobrand uninstall first.'
+
+  WORK_DIR="$(mktemp -d /tmp/ou-mieru.XXXXXX)"
+  local installer="$WORK_DIR/install-mita.sh"
+
+  say "Downloading pinned Mieru installer ${INSTALLER_VERSION}."
+  curl --fail --location --silent --show-error "$INSTALLER_URL" -o "$installer"
+  printf '%s  %s\n' "$INSTALLER_SHA256" "$installer" | sha256sum --check --status || die 'Installer checksum verification failed.'
+  chmod 700 "$installer"
+
+  say "Installing Mieru on TCP ${PORT}; advertised endpoint: ${ENTRY_HOST}:${ENTRY_PORT}."
+  bash "$installer" --install -y \
+    --port "$PORT" \
+    --protocol TCP \
+    --profile iplc \
+    --advertise-host "$ENTRY_HOST" \
+    --advertise-port "$ENTRY_PORT" \
+    --mtu safe \
+    --multiplexing off \
+    --handshake-mode no-wait \
+    --traffic-pattern off \
+    --low-entropy off \
+    --mieru-channel stable \
+    --user "$PROXY_USER" \
+    --password "$PROXY_PASSWORD"
+}
+
+write_tcp_tuning() {
+  if [[ -e "$TUNING_FILE" ]]; then
+    TUNING_BACKUP="${TUNING_FILE}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -a "$TUNING_FILE" "$TUNING_BACKUP"
+    say "Backed up existing tuning file to $TUNING_BACKUP."
+  fi
+
+  install -m 0644 /dev/stdin "$TUNING_FILE" <<'EOF'
+# Managed by Ou-Mieru. Values are maximum auto-tuning ceilings.
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_moderate_rcvbuf = 1
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.ipv4.tcp_rmem = 4096 131072 67108864
+net.ipv4.tcp_wmem = 4096 16384 67108864
+net.core.netdev_max_backlog = 4096
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_slow_start_after_idle = 0
+EOF
+
+  modprobe tcp_bbr 2>/dev/null || true
+  if ! sysctl -n net.ipv4.tcp_available_congestion_control | tr ' ' '\n' | grep -qx bbr; then
+    warn 'The current kernel does not provide BBR. FQ and the other TCP settings will still be applied.'
+    sed -i '/^net\.ipv4\.tcp_congestion_control = bbr$/d' "$TUNING_FILE"
+  fi
+
+  sysctl -p "$TUNING_FILE" >/dev/null
+}
+
+apply_fq() {
+  local iface
+  while read -r iface; do
+    [[ -n "$iface" && "$iface" != lo ]] || continue
+    if tc qdisc replace dev "$iface" root fq 2>/dev/null; then
+      say "Applied FQ to $iface."
+    else
+      warn "Could not apply FQ to $iface; continuing."
+    fi
+  done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2}' | sort -u)
+}
+
+install_shortcut() {
+  [[ -r "$SELF_PATH" ]] || die "Cannot read the running script ($SELF_PATH). Download it first, then run sudo bash ./nobrand."
+  if [[ -e "$SHORTCUT_PATH" || -L "$SHORTCUT_PATH" ]]; then
+    local existing_target
+    existing_target="$(readlink -f "$SHORTCUT_PATH" 2>/dev/null || true)"
+    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH already exists and is not managed by Ou-Mieru."
+  fi
+  install -D -m 0755 "$SELF_PATH" "${INSTALL_DIR}/nobrand"
+  [[ -L "$SHORTCUT_PATH" ]] || ln -s "${INSTALL_DIR}/nobrand" "$SHORTCUT_PATH"
+}
+
+check_shortcut_path() {
+  if [[ -e "$SHORTCUT_PATH" || -L "$SHORTCUT_PATH" ]]; then
+    local existing_target
+    existing_target="$(readlink -f "$SHORTCUT_PATH" 2>/dev/null || true)"
+    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH already exists and is not managed by Ou-Mieru."
+  fi
+}
+
+write_state() {
+  install -D -m 0600 /dev/stdin "$STATE_FILE" <<EOF
+PORT=$PORT
+ENTRY_HOST=$ENTRY_HOST
+ENTRY_PORT=$ENTRY_PORT
+NODE_NAME=$NODE_NAME
+PROXY_USER=$PROXY_USER
+PROXY_PASSWORD=$PROXY_PASSWORD
+TUNING_BACKUP=$TUNING_BACKUP
+EOF
+}
+
+load_state() {
+  [[ -r "$STATE_FILE" ]] || die 'No Ou-Mieru deployment metadata found on this host.'
+  # State values are written by this script after strict token validation.
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+}
+
+mieru_uri() {
+  printf 'mieru://%s:%s@%s:%s/?transport=TCP&mtu=1400&multiplexing=MULTIPLEXING_OFF#%s\n' \
+    "$PROXY_USER" "$PROXY_PASSWORD" "$ENTRY_HOST" "$ENTRY_PORT" "$NODE_NAME"
+}
+
+print_protocol() {
+  cat <<EOF
+
+MMWX-compatible Mieru URI:
+$(mieru_uri)
+
+Clash / mihomo YAML:
+proxies:
+  - name: $NODE_NAME
+    type: mieru
+    server: $ENTRY_HOST
+    port: $ENTRY_PORT
+    transport: TCP
+    udp: true
+    username: $PROXY_USER
+    password: $PROXY_PASSWORD
+    multiplexing: MULTIPLEXING_OFF
+    mtu: 1400
+EOF
+}
+
+verify() {
+  local status=0
+  say 'Verification:'
+  if ss -H -lnt "sport = :$PORT" | grep -q .; then
+    say "  PASS: Mieru is listening on TCP $PORT."
+  else
+    warn "Mieru is not listening on TCP $PORT."
+    status=1
+  fi
+  say "  Congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
+  say "  Default qdisc: $(sysctl -n net.core.default_qdisc)"
+  say "  TCP auto-tuning maximum: $(sysctl -n net.core.rmem_max) bytes"
+  install-mita doctor || status=1
+  return "$status"
+}
+
+run_install() {
+  parse_install_args "$@"
+  require_root
+  validate_host
+  detect_network
+  check_port
+  check_shortcut_path
+
+  if ((DRY_RUN)); then
+    say "Dry run: would install Mieru on TCP $PORT and advertise $ENTRY_HOST:$ENTRY_PORT."
+    say 'Dry run: would apply FQ and a 64 MiB TCP auto-tuning maximum.'
+    return 0
+  fi
+
+  install_mieru
+  write_tcp_tuning
+  apply_fq
+  install_shortcut
+  write_state
+  verify
+  banner
+  print_protocol
+  say "Use 'nobrand show' to view this protocol again."
+  say "The provider L4 entry ($ENTRY_HOST:$ENTRY_PORT) must already forward to this VPS."
+}
+
+show_protocol() {
+  require_root
+  load_state
+  banner
+  print_protocol
+  if command -v install-mita >/dev/null 2>&1; then
+    install-mita status
+  else
+    warn 'Mieru OneClick is not installed, although Ou-Mieru metadata remains.'
+  fi
+}
+
+remove_path() {
+  [[ -e "$1" || -L "$1" ]] && unlink "$1"
+}
+
+run_uninstall() {
+  local assume_yes=0
+  [[ "${1:-}" != '--yes' ]] || assume_yes=1
+  require_root
+  load_state
+
+  if (( ! assume_yes )); then
+    banner
+    printf 'This removes Mieru and the Ou-Mieru managed TCP tuning. Continue? [y/N] '
+    local answer
+    read -r answer
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { say 'Cancelled.'; return 0; }
+  fi
+
+  if command -v install-mita >/dev/null 2>&1; then
+    install-mita --uninstall --yes
+  else
+    warn 'install-mita is already absent; removing Ou-Mieru files only.'
+  fi
+
+  if [[ -n "${TUNING_BACKUP:-}" && -f "$TUNING_BACKUP" ]]; then
+    cp -a "$TUNING_BACKUP" "$TUNING_FILE"
+    sysctl -p "$TUNING_FILE" >/dev/null || true
+  else
+    remove_path "$TUNING_FILE"
+  fi
+  remove_path "$STATE_FILE"
+  remove_path "$SHORTCUT_PATH"
+  remove_path "${INSTALL_DIR}/nobrand"
+  rmdir "$STATE_DIR" 2>/dev/null || true
+  rmdir "$INSTALL_DIR" 2>/dev/null || true
+
+  say 'Mieru and Ou-Mieru managed files were removed.'
+  say 'The current FQ qdisc remains active until the next reboot or network-device recreation.'
+}
+
+interactive_install() {
+  local port entry_host entry_port node_name
+  local -a install_args
+  read -r -p 'Mieru listening port (for example 20101): ' port
+  read -r -p 'Client-facing L4 entry IP/domain: ' entry_host
+  read -r -p 'Client-facing L4 entry port [same as listening port]: ' entry_port
+  read -r -p 'MMWX node name [ou-mieru]: ' node_name
+  install_args=(--port "$port" --entry-host "$entry_host")
+  [[ -z "$entry_port" ]] || install_args+=(--entry-port "$entry_port")
+  [[ -z "$node_name" ]] || install_args+=(--name "$node_name")
+  run_install "${install_args[@]}"
+}
+
+menu() {
+  require_root
+  banner
+  cat <<'EOF'
+  1) One-click install Mieru
+  2) View Mieru protocol
+  3) One-click uninstall
+  0) Exit
+EOF
+  printf '\nSelect [0-3]: '
+  local selection
+  read -r selection
+  case "$selection" in
+    1) interactive_install ;;
+    2) show_protocol ;;
+    3) run_uninstall ;;
+    0) exit 0 ;;
+    *) die 'Invalid selection.' ;;
+  esac
+}
+
+main() {
+  case "${1:-menu}" in
+    menu)
+      shift || true; menu ;;
+    install)
+      shift; run_install "$@" ;;
+    show)
+      shift; (($# == 0)) || die 'show does not accept options.'; show_protocol ;;
+    uninstall)
+      shift; (($# == 0 || ($# == 1 && "$1" == '--yes'))) || die 'Use uninstall or uninstall --yes.'; run_uninstall "${1:-}" ;;
+    -h|--help|help)
+      banner; usage ;;
+    --*)
+      run_install "$@" ;;
+    *)
+      die "Unknown command: $1" ;;
+  esac
+}
+
+main "$@"

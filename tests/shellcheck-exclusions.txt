@@ -1,0 +1,3 @@
+# Keep this file available for contributors who run shellcheck locally.
+# The script is intentionally Bash-specific and should be checked with:
+# shellcheck --shell=bash dual-mieru.sh
