@@ -121,6 +121,9 @@ ss -lntp | grep ':20101'
 ## 🙏 致谢
 
 - [enfein/mieru](https://github.com/enfein/mieru)：Mieru 官方协议、客户端与服务端运行时。
+- [ike-sh/NoBrand-OneClick](https://github.com/ike-sh/NoBrand-OneClick)：感谢 Ike 爹提供的上游项目与实现参考。
+
+附言：谢谢ike爹。
 
 ## 📄 许可证
 
