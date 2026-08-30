@@ -11,6 +11,7 @@ readonly MIERU_VERSION='v3.36.0'
 readonly MIERU_RELEASE_URL="https://github.com/enfein/mieru/releases/download/${MIERU_VERSION}"
 readonly MIERU_AMD64_SHA256='44622bea7fac732984ac6cf1189e555fd9add1969001e9b2d7cdea9416b5919a'
 readonly MIERU_ARM64_SHA256='a43dbc4d75dcb18978ea79b924ce859e2485af8b776dfc981b29a7b60644157c'
+readonly APT_LOCK_TIMEOUT=300
 readonly STATE_DIR='/etc/ou-mieru'
 readonly STATE_FILE="${STATE_DIR}/install.env"
 readonly CONFIG_FILE='/etc/ou-mieru/server-config.json'
@@ -185,7 +186,14 @@ validate_host() {
   require_command ss
   require_command dpkg
   require_command dpkg-query
+  require_command apt-get
   require_command systemctl
+}
+
+apt_get() {
+  DEBIAN_FRONTEND=noninteractive apt-get \
+    -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" \
+    -y "$@"
 }
 
 detect_network() {
@@ -233,10 +241,12 @@ install_mieru() {
 
   if dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
     PACKAGE_OWNED=0
-    dpkg -i "$WORK_DIR/$package" >/dev/null || die 'Mieru 软件包升级失败。'
+    say "软件包管理器繁忙时将等待，最长 ${APT_LOCK_TIMEOUT} 秒。"
+    apt_get install --reinstall "$WORK_DIR/$package" || die 'Mieru 软件包升级失败，请稍后重新运行脚本。'
   else
     PACKAGE_OWNED=1
-    dpkg -i "$WORK_DIR/$package" >/dev/null || die 'Mieru 软件包安装失败。'
+    say "软件包管理器繁忙时将等待，最长 ${APT_LOCK_TIMEOUT} 秒。"
+    apt_get install "$WORK_DIR/$package" || die 'Mieru 软件包安装失败，请稍后重新运行脚本。'
   fi
 
   require_command mita
@@ -268,9 +278,11 @@ prepare_existing_install() {
     else
       say '检测到已有 Mieru，正在按 --reinstall 要求卸载旧实例。'
     fi
-    systemctl disable --now mita.service >/dev/null 2>&1 || true
     if dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
-      dpkg -r mita >/dev/null 2>&1 || die '卸载旧 Mieru 软件包失败，已停止重装。'
+      say "正在等待软件包管理器并卸载旧 Mieru，最长等待 ${APT_LOCK_TIMEOUT} 秒。"
+      apt_get remove mita || die '卸载旧 Mieru 软件包失败，旧部署信息仍保留，请稍后重试。'
+    else
+      systemctl disable --now mita.service >/dev/null 2>&1 || true
     fi
     rm -f /usr/local/bin/install-mita /usr/local/bin/mita-menu /usr/local/bin/mita /usr/local/bin/mita-real
     rm -f /etc/mita/server.conf.pb
@@ -413,7 +425,8 @@ run_uninstall() {
     systemctl disable --now mita.service >/dev/null 2>&1 || true
   fi
   if [[ "${PACKAGE_OWNED:-0}" == 1 ]] && dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
-    dpkg -r mita >/dev/null 2>&1 || warn 'Mieru 软件包卸载失败，请手动执行 dpkg -r mita。'
+    say "正在等待软件包管理器并卸载 Mieru，最长等待 ${APT_LOCK_TIMEOUT} 秒。"
+    apt_get remove mita || die 'Mieru 软件包卸载失败，Ou-Mieru 部署信息仍保留，请稍后重试。'
     remove_path /etc/mita/server.conf.pb
   fi
 
