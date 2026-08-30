@@ -472,7 +472,7 @@ interactive_install() {
     is_safe_host "$entry_host" && break
     printf '请输入 IPv4 地址或域名，不能包含空格。\n' >&2
   done
-  read -r -p "第 3 步，填写入口端口 [${port}]（外部入口端口；与本机端口相同通常直接回车）：" entry_port
+  read -r -p "第 3 步，填写入口端口 [${port}]（外部入口端口；无特殊需求可直接回车）：" entry_port
   read -r -p '节点名称 [ou-mieru]：' node_name
   install_args=(--port "$port" --entry-host "$entry_host" --reinstall)
   [[ -z "$entry_port" ]] || install_args+=(--entry-port "$entry_port")
