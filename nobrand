@@ -8,9 +8,8 @@ IFS=$'\n\t'
 readonly PROJECT_NAME='Ou-Mieru (For Nobrand Dual)'
 readonly PROJECT_AUTHOR='nodeseek@cshaizhihao'
 readonly INSTALLER_VERSION='v2.2.1'
-readonly INSTALLER_URL="https://raw.githubusercontent.com/ike-sh/mieru-OneClick/${INSTALLER_VERSION}/install-mita.sh"
+readonly INSTALLER_URL="https://raw.githubusercontent.com/ike-sh/NoBrand-OneClick/${INSTALLER_VERSION}/install-mita.sh"
 readonly INSTALLER_SHA256='f94d22a1ce567a51f0c19128cd79e5b4703e9863d146ea526891540863d70819'
-readonly TUNING_FILE='/etc/sysctl.d/99-ou-mieru-tuning.conf'
 readonly STATE_DIR='/etc/ou-mieru'
 readonly STATE_FILE="${STATE_DIR}/install.env"
 readonly INSTALL_DIR='/usr/local/lib/ou-mieru'
@@ -26,7 +25,6 @@ PROXY_PASSWORD=''
 DRY_RUN=0
 REINSTALL=0
 INTERACTIVE_INSTALL=0
-TUNING_BACKUP=''
 DETECTED_DEFAULT_IFACE=''
 DETECTED_PUBLIC_IP=''
 DETECTED_PRIVATE_INTERFACES=''
@@ -181,8 +179,6 @@ validate_host() {
   require_command curl
   require_command sha256sum
   require_command ip
-  require_command tc
-  require_command sysctl
   require_command ss
 }
 
@@ -248,49 +244,6 @@ prepare_existing_install() {
   return 0
 }
 
-write_tcp_tuning() {
-  if [[ -e "$TUNING_FILE" ]]; then
-    TUNING_BACKUP="${TUNING_FILE}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
-    cp -a "$TUNING_FILE" "$TUNING_BACKUP"
-    say "已备份现有 TCP 调优文件：$TUNING_BACKUP。"
-  fi
-
-  install -m 0644 /dev/stdin "$TUNING_FILE" <<'EOF'
-# Managed by Ou-Mieru. Values are maximum auto-tuning ceilings.
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_moderate_rcvbuf = 1
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.ipv4.tcp_rmem = 4096 131072 67108864
-net.ipv4.tcp_wmem = 4096 16384 67108864
-net.core.netdev_max_backlog = 4096
-net.ipv4.tcp_max_syn_backlog = 2048
-net.ipv4.tcp_slow_start_after_idle = 0
-EOF
-
-  modprobe tcp_bbr 2>/dev/null || true
-  if ! sysctl -n net.ipv4.tcp_available_congestion_control | tr ' ' '\n' | grep -qx bbr; then
-    warn '当前内核不提供 BBR，将继续应用 FQ 和其他 TCP 参数。'
-    sed -i '/^net\.ipv4\.tcp_congestion_control = bbr$/d' "$TUNING_FILE"
-  fi
-
-  sysctl -p "$TUNING_FILE" >/dev/null
-}
-
-apply_fq() {
-  local iface
-  while read -r iface; do
-    [[ -n "$iface" && "$iface" != lo ]] || continue
-    if tc qdisc replace dev "$iface" root fq 2>/dev/null; then
-      say "已将 FQ 应用到网卡 $iface。"
-    else
-      warn "无法将 FQ 应用到网卡 $iface，继续执行。"
-    fi
-  done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2}' | sort -u)
-}
-
 install_shortcut() {
   [[ -r "$SELF_PATH" ]] || die "无法读取当前脚本（$SELF_PATH），请先下载后再运行 sudo bash ./nobrand。"
   if [[ -e "$SHORTCUT_PATH" || -L "$SHORTCUT_PATH" ]]; then
@@ -318,7 +271,6 @@ ENTRY_PORT=$ENTRY_PORT
 NODE_NAME=$NODE_NAME
 PROXY_USER=$PROXY_USER
 PROXY_PASSWORD=$PROXY_PASSWORD
-TUNING_BACKUP=$TUNING_BACKUP
 EOF
 }
 
@@ -364,9 +316,6 @@ verify() {
     warn "Mieru 没有监听 TCP $PORT。"
     status=1
   fi
-  say "  拥塞控制：$(sysctl -n net.ipv4.tcp_congestion_control)"
-  say "  默认队列规则：$(sysctl -n net.core.default_qdisc)"
-  say "  TCP 自动缓冲上限：$(sysctl -n net.core.rmem_max) 字节"
   install-mita doctor || status=1
   return "$status"
 }
@@ -379,7 +328,6 @@ run_install() {
 
   if ((DRY_RUN)); then
     say "演练模式：将安装监听 TCP $PORT、入口为 $ENTRY_HOST:$ENTRY_PORT 的 Mieru。"
-    say '演练模式：将应用 FQ 和 64 MiB TCP 自动缓冲上限。'
     return 0
   fi
 
@@ -388,8 +336,6 @@ run_install() {
   check_shortcut_path
 
   install_mieru
-  write_tcp_tuning
-  apply_fq
   install_shortcut
   write_state
   verify
@@ -423,7 +369,7 @@ run_uninstall() {
 
   if (( ! assume_yes )); then
     banner
-    printf '将卸载 Mieru，并删除 Ou-Mieru 管理的 TCP 调优。继续吗？[y/N] '
+    printf '将卸载 Mieru，并删除 Ou-Mieru 管理的文件。继续吗？[y/N] '
     local answer
     read -r answer
     [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { say '已取消。'; return 0; }
@@ -435,12 +381,6 @@ run_uninstall() {
     warn '未检测到 install-mita，将只删除 Ou-Mieru 文件。'
   fi
 
-  if [[ -n "${TUNING_BACKUP:-}" && -f "$TUNING_BACKUP" ]]; then
-    cp -a "$TUNING_BACKUP" "$TUNING_FILE"
-    sysctl -p "$TUNING_FILE" >/dev/null || true
-  else
-    remove_path "$TUNING_FILE"
-  fi
   remove_path "$STATE_FILE"
   remove_path "$SHORTCUT_PATH"
   remove_path "${INSTALL_DIR}/nobrand"
@@ -448,7 +388,6 @@ run_uninstall() {
   rmdir "$INSTALL_DIR" 2>/dev/null || true
 
   say '已卸载 Mieru 并删除 Ou-Mieru 管理的文件。'
-  say '当前 FQ 队列规则会保留到下次重启或网卡重新创建。'
 }
 
 interactive_install() {

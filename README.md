@@ -50,7 +50,6 @@ sudo nobrand
 - 安装 Mieru 协议：TCP + IPLC 预设，适用于 Nobrand Dual 网络。
 - 自动生成用户名和密码，并输出 `mieru://` 协议链接。
 - 输出通用 YAML 配置，便于导入支持 Mieru 的客户端。
-- 自动应用系统兼容的基础网络参数优化。
 - 查看当前协议、服务状态和诊断结果。
 - 已有 Mieru 时支持确认后重装。
 - 一键卸载 Mieru 及 Ou-Mieru 管理文件。
