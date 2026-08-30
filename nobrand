@@ -7,11 +7,13 @@ IFS=$'\n\t'
 
 readonly PROJECT_NAME='Ou-Mieru (For Nobrand Dual)'
 readonly PROJECT_AUTHOR='nodeseek@cshaizhihao'
-readonly INSTALLER_VERSION='v2.2.1'
-readonly INSTALLER_URL="https://raw.githubusercontent.com/ike-sh/NoBrand-OneClick/${INSTALLER_VERSION}/install-mita.sh"
-readonly INSTALLER_SHA256='f94d22a1ce567a51f0c19128cd79e5b4703e9863d146ea526891540863d70819'
+readonly MIERU_VERSION='v3.36.0'
+readonly MIERU_RELEASE_URL="https://github.com/enfein/mieru/releases/download/${MIERU_VERSION}"
+readonly MIERU_AMD64_SHA256='44622bea7fac732984ac6cf1189e555fd9add1969001e9b2d7cdea9416b5919a'
+readonly MIERU_ARM64_SHA256='a43dbc4d75dcb18978ea79b924ce859e2485af8b776dfc981b29a7b60644157c'
 readonly STATE_DIR='/etc/ou-mieru'
 readonly STATE_FILE="${STATE_DIR}/install.env"
+readonly CONFIG_FILE='/etc/ou-mieru/server-config.json'
 readonly INSTALL_DIR='/usr/local/lib/ou-mieru'
 readonly SHORTCUT_PATH='/usr/local/bin/nobrand'
 readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
@@ -22,6 +24,7 @@ ENTRY_PORT=''
 NODE_NAME='ou-mieru'
 PROXY_USER=''
 PROXY_PASSWORD=''
+PACKAGE_OWNED=0
 DRY_RUN=0
 REINSTALL=0
 INTERACTIVE_INSTALL=0
@@ -180,6 +183,9 @@ validate_host() {
   require_command sha256sum
   require_command ip
   require_command ss
+  require_command dpkg
+  require_command dpkg-query
+  require_command systemctl
 }
 
 detect_network() {
@@ -204,32 +210,55 @@ check_port() {
 
 install_mieru() {
   WORK_DIR="$(mktemp -d /tmp/ou-mieru.XXXXXX)"
-  local installer="$WORK_DIR/install-mita.sh"
+  local package architecture checksum package_url
+  architecture="$(dpkg --print-architecture)"
+  case "$architecture" in
+    amd64)
+      package="mita_${MIERU_VERSION#v}_amd64.deb"
+      checksum="$MIERU_AMD64_SHA256"
+      ;;
+    arm64)
+      package="mita_${MIERU_VERSION#v}_arm64.deb"
+      checksum="$MIERU_ARM64_SHA256"
+      ;;
+    *)
+      die "不支持的 CPU 架构：$architecture。本脚本支持 amd64 和 arm64。"
+      ;;
+  esac
+  package_url="${MIERU_RELEASE_URL}/${package}"
 
-  say "正在下载并校验 Mieru 安装器 ${INSTALLER_VERSION}。"
-  curl --fail --location --silent --show-error "$INSTALLER_URL" -o "$installer"
-  printf '%s  %s\n' "$INSTALLER_SHA256" "$installer" | sha256sum --check --status || die '安装器校验失败，已停止。'
-  chmod 700 "$installer"
+  say "正在下载并校验 Mieru 官方运行时 ${MIERU_VERSION}。"
+  curl --fail --location --silent --show-error "$package_url" -o "$WORK_DIR/$package"
+  printf '%s  %s\n' "$checksum" "$WORK_DIR/$package" | sha256sum --check --status || die 'Mieru 安装包校验失败，已停止。'
 
-  say "正在安装 Mieru，监听 TCP ${PORT}，客户端入口为 ${ENTRY_HOST}:${ENTRY_PORT}。"
-  bash "$installer" --install -y \
-    --port "$PORT" \
-    --protocol TCP \
-    --profile iplc \
-    --advertise-host "$ENTRY_HOST" \
-    --advertise-port "$ENTRY_PORT" \
-    --mtu safe \
-    --multiplexing off \
-    --handshake-mode no-wait \
-    --traffic-pattern off \
-    --low-entropy off \
-    --mieru-channel stable \
-    --user "$PROXY_USER" \
-    --password "$PROXY_PASSWORD"
+  if dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
+    PACKAGE_OWNED=0
+    dpkg -i "$WORK_DIR/$package" >/dev/null || die 'Mieru 软件包升级失败。'
+  else
+    PACKAGE_OWNED=1
+    dpkg -i "$WORK_DIR/$package" >/dev/null || die 'Mieru 软件包安装失败。'
+  fi
+
+  require_command mita
+  say "正在写入 Mieru 配置，监听 TCP ${PORT}，客户端入口为 ${ENTRY_HOST}:${ENTRY_PORT}。"
+  install -d -m 0755 "$STATE_DIR"
+  install -m 0600 /dev/stdin "$CONFIG_FILE" <<EOF
+{
+  "portBindings": [{"port": $PORT, "protocol": "TCP"}],
+  "users": [{"name": "$PROXY_USER", "password": "$PROXY_PASSWORD"}],
+  "mtu": 1400
+}
+EOF
+  mita apply config "$CONFIG_FILE" >/dev/null || die 'Mieru 配置写入失败。'
+  systemctl enable --now mita.service >/dev/null 2>&1 || die 'Mieru 服务启动失败。'
 }
 
 prepare_existing_install() {
-  [[ ! -x /usr/local/bin/install-mita ]] || {
+  local existing=0
+  command -v mita >/dev/null 2>&1 && existing=1
+  dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii' && existing=1
+  (( existing )) || return 0
+
     (( REINSTALL )) || die '检测到 Mieru 已安装；如需覆盖安装，请重新运行并加入 --reinstall。'
     if (( INTERACTIVE_INSTALL )); then
       printf '%s检测到已有 Mieru。将先卸载旧实例及其配置，再安装新实例。继续吗？[y/N] %s' "$C_YELLOW" "$C_RESET"
@@ -239,8 +268,12 @@ prepare_existing_install() {
     else
       say '检测到已有 Mieru，正在按 --reinstall 要求卸载旧实例。'
     fi
-    install-mita --uninstall --yes || die '卸载旧 Mieru 失败，已停止重装。'
-  }
+    systemctl disable --now mita.service >/dev/null 2>&1 || true
+    if dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
+      dpkg -r mita >/dev/null 2>&1 || die '卸载旧 Mieru 软件包失败，已停止重装。'
+    fi
+    rm -f /usr/local/bin/install-mita /usr/local/bin/mita-menu /usr/local/bin/mita /usr/local/bin/mita-real
+    rm -f /etc/mita/server.conf.pb
   return 0
 }
 
@@ -271,6 +304,7 @@ ENTRY_PORT=$ENTRY_PORT
 NODE_NAME=$NODE_NAME
 PROXY_USER=$PROXY_USER
 PROXY_PASSWORD=$PROXY_PASSWORD
+PACKAGE_OWNED=$PACKAGE_OWNED
 EOF
 }
 
@@ -282,7 +316,7 @@ load_state() {
 }
 
 mieru_uri() {
-  printf 'mieru://%s:%s@%s:%s/?transport=TCP&mtu=1400&multiplexing=MULTIPLEXING_OFF#%s\n' \
+  printf 'mierus://%s:%s@%s:%s/?transport=TCP&mtu=1400&multiplexing=MULTIPLEXING_OFF#%s\n' \
     "$PROXY_USER" "$PROXY_PASSWORD" "$ENTRY_HOST" "$ENTRY_PORT" "$NODE_NAME"
 }
 
@@ -316,7 +350,7 @@ verify() {
     warn "Mieru 没有监听 TCP $PORT。"
     status=1
   fi
-  install-mita doctor || status=1
+  mita status || status=1
   return "$status"
 }
 
@@ -350,10 +384,10 @@ show_protocol() {
   load_state
   banner
   print_protocol
-  if command -v install-mita >/dev/null 2>&1; then
-    install-mita status
+  if command -v mita >/dev/null 2>&1; then
+    mita status || true
   else
-    warn '未检测到 Mieru 安装器，但 Ou-Mieru 的部署信息仍保留。'
+    warn '未检测到 Mieru 运行时，但 Ou-Mieru 的部署信息仍保留。'
   fi
 }
 
@@ -375,13 +409,16 @@ run_uninstall() {
     [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { say '已取消。'; return 0; }
   fi
 
-  if command -v install-mita >/dev/null 2>&1; then
-    install-mita --uninstall --yes
-  else
-    warn '未检测到 install-mita，将只删除 Ou-Mieru 文件。'
+  if command -v mita >/dev/null 2>&1; then
+    systemctl disable --now mita.service >/dev/null 2>&1 || true
+  fi
+  if [[ "${PACKAGE_OWNED:-0}" == 1 ]] && dpkg-query -W -f='${db:Status-Abbrev}' mita 2>/dev/null | grep -q '^ii'; then
+    dpkg -r mita >/dev/null 2>&1 || warn 'Mieru 软件包卸载失败，请手动执行 dpkg -r mita。'
+    remove_path /etc/mita/server.conf.pb
   fi
 
   remove_path "$STATE_FILE"
+  remove_path "$CONFIG_FILE"
   remove_path "$SHORTCUT_PATH"
   remove_path "${INSTALL_DIR}/nobrand"
   rmdir "$STATE_DIR" 2>/dev/null || true

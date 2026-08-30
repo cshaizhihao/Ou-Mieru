@@ -12,6 +12,8 @@
 
 Ou-Mieru 面向“大陆入口 + 日本落地”的 Nobrand Dual VPS，在日本 VPS 上安装 Mieru，并自动输出客户端所需的协议配置。
 
+本项目不依赖 `NoBrand-OneClick` 等第三方管理器：脚本直接校验并安装 Mieru 官方发布的 `mita` 运行时，再由 Ou-Mieru 自己完成配置、启动、状态查看和卸载。
+
 ## 🚀 快速开始
 
 在日本 VPS 上执行一行命令：
@@ -48,7 +50,7 @@ sudo nobrand
 ## ✨ 功能
 
 - 安装 Mieru 协议：TCP + IPLC 预设，适用于 Nobrand Dual 网络。
-- 自动生成用户名和密码，并输出 `mieru://` 协议链接。
+- 自动生成用户名和密码，并输出 `mierus://` 协议链接。
 - 输出通用 YAML 配置，便于导入支持 Mieru 的客户端。
 - 查看当前协议、服务状态和诊断结果。
 - 已有 Mieru 时支持确认后重装。
@@ -103,8 +105,8 @@ sudo ./nobrand install \
 
 ```bash
 sudo nobrand show
-install-mita status
-install-mita doctor
+mita status
+mita describe config
 ss -lntp | grep ':20101'
 ```
 
@@ -118,8 +120,7 @@ ss -lntp | grep ':20101'
 
 ## 🙏 致谢
 
-- [ike-sh/mieru-OneClick](https://github.com/ike-sh/mieru-OneClick)：Mieru 服务端安装器。
-- [enfein/mieru](https://github.com/enfein/mieru)：Mieru 协议与客户端实现。
+- [enfein/mieru](https://github.com/enfein/mieru)：Mieru 官方协议、客户端与服务端运行时。
 
 ## 📄 许可证
 
