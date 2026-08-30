@@ -8,7 +8,7 @@
   <strong>为 NobrandCloud 的 Dual 机器设计，面向懒人和小白的一键 Mieru 协议搭建脚本。</strong>
 </p>
 
-<p align="center">Author: <a href="https://www.nodeseek.com/space/23179">nodeseek@cshaizhihao</a></p>
+<p align="center">作者：<a href="https://www.nodeseek.com/space/23179">nodeseek@cshaizhihao</a></p>
 
 Ou-Mieru 用于具有“大陆入口 + 日本落地”L4 转发网络的 Nobrand Dual VPS：在日本 VPS 部署 Mieru，客户端连接服务商提供的移动入口，再经专线到日本公网出口。
 
@@ -79,10 +79,10 @@ sudo nobrand
 ## 菜单与命令
 
 ```text
-1) One-click install Mieru
-2) View Mieru protocol
-3) One-click uninstall
-0) Exit
+1) 一键安装 Mieru
+2) 查看 Mieru 协议
+3) 一键卸载
+0) 退出
 ```
 
 安装后：

@@ -32,41 +32,41 @@ NETWORK_DETECTED=0
 
 banner() {
   cat <<'EOF'
-   ____        __  __ _
-  / __ \ _   _|  \/  (_)_ __ _   _
- | |  | | | | | |\/| | | '__| | | |
- | |__| | |_| | |  | | | |  | |_| |
-  \____/ \__,_|_|  |_|_|_|   \__,_|
+  ___  _   _       __  __ ___ _____ ____  _   _
+ / _ \| | | |     |  \/  |_ _| ____|  _ \| | | |
+| | | | | | |_____| |\/| || ||  _| | |_) | | | |
+| |_| | |_| |_____| |  | || || |___|  _ <| |_| |
+ \___/ \___/      |_|  |_|___|_____|_| \_\\___/
 EOF
-  printf '\n  %s\n  %s\n\n' "$PROJECT_NAME" "Author: $PROJECT_AUTHOR"
+  printf '  [ O U - M I E R U ]\n'
+  printf '\n  %s\n  作者：%s\n\n' "$PROJECT_NAME" "$PROJECT_AUTHOR"
 }
 
 usage() {
   cat <<'EOF'
-Usage:
-  nobrand                         Open the interactive menu.
-  nobrand install --port PORT --entry-host HOST [options]
-  nobrand show                    Show the saved Mieru URI and current status.
-  nobrand uninstall [--yes]       Remove this Mieru deployment.
+用法：
+  nobrand                         打开交互式菜单。
+  nobrand install --port PORT --entry-host HOST [选项]
+  nobrand show                    查看已保存的 Mieru 协议和当前状态。
+  nobrand uninstall [--yes]       一键卸载本项目部署。
 
-Install options:
-  --port PORT          Mieru TCP listening port on this VPS. Required.
-  --entry-host HOST    Client-facing L4 entry IP or domain. Required.
-  --entry-port PORT    Client-facing L4 entry port. Defaults to --port.
-  --name NAME          Node name: letters, digits, dot, underscore, hyphen.
-  --user USER          Mieru username. Generated when omitted.
-  --password PASSWORD  Mieru password. Generated when omitted.
-  --dry-run            Validate only; make no host changes.
-  -h, --help           Show this help.
+安装选项：
+  --port PORT          本机 Mieru TCP 监听端口，必填。
+  --entry-host HOST    客户端使用的 L4 入口 IP 或域名，必填。
+  --entry-port PORT    客户端使用的入口端口，默认等于 --port。
+  --name NAME          节点名称，只允许字母、数字、点、下划线和短横线。
+  --user USER          Mieru 用户名，不填则随机生成。
+  --password PASSWORD  Mieru 密码，不填则随机生成。
+  --dry-run            只检查参数，不修改系统。
+  -h, --help           查看帮助。
 
-For existing non-interactive users, options starting with --port are treated as
-the install command.
+直接以 --port 开头的参数会被当作安装命令处理。
 EOF
 }
 
 say() { printf '[ou-mieru] %s\n' "$*"; }
-warn() { printf '[ou-mieru] WARNING: %s\n' "$*" >&2; }
-die() { printf '[ou-mieru] ERROR: %s\n' "$*" >&2; exit 1; }
+warn() { printf '[ou-mieru] 警告：%s\n' "$*" >&2; }
+die() { printf '[ou-mieru] 错误：%s\n' "$*" >&2; exit 1; }
 
 cleanup() {
   if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
@@ -77,7 +77,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_root() {
-  [[ "${EUID}" -eq 0 ]] || die 'Run this script as root (use sudo).'
+  [[ "${EUID}" -eq 0 ]] || die '请使用 root 运行本脚本（例如 sudo nobrand）。'
 }
 
 is_valid_port() {
@@ -102,7 +102,7 @@ random_token() {
 
 take_value() {
   local flag="$1"
-  [[ $# -ge 2 && -n "${2:-}" && "${2:-}" != --* ]] || die "$flag requires a value."
+  [[ $# -ge 2 && -n "${2:-}" && "${2:-}" != --* ]] || die "$flag 需要提供值。"
 }
 
 parse_install_args() {
@@ -125,36 +125,36 @@ parse_install_args() {
       -h|--help)
         usage; exit 0 ;;
       *)
-        die "Unknown install option: $1" ;;
+        die "未知的安装选项：$1" ;;
     esac
   done
 
-  [[ -n "$PORT" ]] || die '--port is required.'
-  [[ -n "$ENTRY_HOST" ]] || die '--entry-host is required.'
-  is_valid_port "$PORT" || die '--port must be between 1025 and 65535.'
-  is_safe_host "$ENTRY_HOST" || die '--entry-host must be an IPv4 address or DNS name.'
+  [[ -n "$PORT" ]] || die '--port 为必填项。'
+  [[ -n "$ENTRY_HOST" ]] || die '--entry-host 为必填项。'
+  is_valid_port "$PORT" || die '--port 必须是 1025 到 65535 之间的整数。'
+  is_safe_host "$ENTRY_HOST" || die '--entry-host 必须是 IPv4 地址或域名。'
 
   ENTRY_PORT="${ENTRY_PORT:-$PORT}"
-  is_valid_port "$ENTRY_PORT" || die '--entry-port must be between 1025 and 65535.'
-  is_safe_token "$NODE_NAME" || die '--name may contain only letters, digits, dot, underscore, and hyphen.'
+  is_valid_port "$ENTRY_PORT" || die '--entry-port 必须是 1025 到 65535 之间的整数。'
+  is_safe_token "$NODE_NAME" || die '--name 只能包含字母、数字、点、下划线和短横线。'
 
   PROXY_USER="${PROXY_USER:-$(random_token 12)}"
   PROXY_PASSWORD="${PROXY_PASSWORD:-$(random_token 18)}"
-  is_safe_token "$PROXY_USER" || die '--user contains unsupported characters.'
-  is_safe_token "$PROXY_PASSWORD" || die '--password contains unsupported characters.'
+  is_safe_token "$PROXY_USER" || die '--user 含有不支持的字符。'
+  is_safe_token "$PROXY_PASSWORD" || die '--password 含有不支持的字符。'
 }
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+  command -v "$1" >/dev/null 2>&1 || die "缺少必要命令：$1"
 }
 
 validate_host() {
-  [[ -r /etc/os-release ]] || die 'Unable to identify the operating system.'
+  [[ -r /etc/os-release ]] || die '无法识别操作系统。'
   # shellcheck disable=SC1091
   . /etc/os-release
   case "${ID:-}" in
     debian|ubuntu) ;;
-    *) die "Unsupported OS: ${PRETTY_NAME:-unknown}. This script supports Debian and Ubuntu." ;;
+    *) die "不支持的操作系统：${PRETTY_NAME:-未知}。本脚本支持 Debian 和 Ubuntu。" ;;
   esac
 
   require_command curl
@@ -175,28 +175,28 @@ detect_network() {
   DETECTED_PRIVATE_INTERFACES="$private_ifaces"
   NETWORK_DETECTED=1
 
-  say "Detected public egress interface: ${default_iface:-unknown} (${public_ip:-unknown})"
-  [[ -z "$private_ifaces" ]] || say "Additional IPv4 interface(s): ${private_ifaces% }"
+  say "已识别公网出口网卡：${default_iface:-未知}（${public_ip:-未知}）"
+  [[ -z "$private_ifaces" ]] || say "其他 IPv4 网卡：${private_ifaces% }"
 }
 
 check_port() {
   if ss -H -lnt "sport = :$PORT" | grep -q .; then
-    die "TCP port $PORT is already in use. Select another provider-approved forwarding port."
+    die "TCP 端口 $PORT 已被占用，请从面板可用端口范围中选择其他端口。"
   fi
 }
 
 install_mieru() {
-  [[ ! -x /usr/local/bin/install-mita ]] || die 'Mieru OneClick is already installed. Use nobrand show or nobrand uninstall first.'
+  [[ ! -x /usr/local/bin/install-mita ]] || die '检测到 Mieru 已安装，请先使用 nobrand show 查看，或使用 nobrand uninstall 卸载。'
 
   WORK_DIR="$(mktemp -d /tmp/ou-mieru.XXXXXX)"
   local installer="$WORK_DIR/install-mita.sh"
 
-  say "Downloading pinned Mieru installer ${INSTALLER_VERSION}."
+  say "正在下载并校验 Mieru 安装器 ${INSTALLER_VERSION}。"
   curl --fail --location --silent --show-error "$INSTALLER_URL" -o "$installer"
-  printf '%s  %s\n' "$INSTALLER_SHA256" "$installer" | sha256sum --check --status || die 'Installer checksum verification failed.'
+  printf '%s  %s\n' "$INSTALLER_SHA256" "$installer" | sha256sum --check --status || die '安装器校验失败，已停止。'
   chmod 700 "$installer"
 
-  say "Installing Mieru on TCP ${PORT}; advertised endpoint: ${ENTRY_HOST}:${ENTRY_PORT}."
+  say "正在安装 Mieru，监听 TCP ${PORT}，客户端入口为 ${ENTRY_HOST}:${ENTRY_PORT}。"
   bash "$installer" --install -y \
     --port "$PORT" \
     --protocol TCP \
@@ -217,7 +217,7 @@ write_tcp_tuning() {
   if [[ -e "$TUNING_FILE" ]]; then
     TUNING_BACKUP="${TUNING_FILE}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -a "$TUNING_FILE" "$TUNING_BACKUP"
-    say "Backed up existing tuning file to $TUNING_BACKUP."
+    say "已备份现有 TCP 调优文件：$TUNING_BACKUP。"
   fi
 
   install -m 0644 /dev/stdin "$TUNING_FILE" <<'EOF'
@@ -237,7 +237,7 @@ EOF
 
   modprobe tcp_bbr 2>/dev/null || true
   if ! sysctl -n net.ipv4.tcp_available_congestion_control | tr ' ' '\n' | grep -qx bbr; then
-    warn 'The current kernel does not provide BBR. FQ and the other TCP settings will still be applied.'
+    warn '当前内核不提供 BBR，将继续应用 FQ 和其他 TCP 参数。'
     sed -i '/^net\.ipv4\.tcp_congestion_control = bbr$/d' "$TUNING_FILE"
   fi
 
@@ -249,19 +249,19 @@ apply_fq() {
   while read -r iface; do
     [[ -n "$iface" && "$iface" != lo ]] || continue
     if tc qdisc replace dev "$iface" root fq 2>/dev/null; then
-      say "Applied FQ to $iface."
+      say "已将 FQ 应用到网卡 $iface。"
     else
-      warn "Could not apply FQ to $iface; continuing."
+      warn "无法将 FQ 应用到网卡 $iface，继续执行。"
     fi
   done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2}' | sort -u)
 }
 
 install_shortcut() {
-  [[ -r "$SELF_PATH" ]] || die "Cannot read the running script ($SELF_PATH). Download it first, then run sudo bash ./nobrand."
+  [[ -r "$SELF_PATH" ]] || die "无法读取当前脚本（$SELF_PATH），请先下载后再运行 sudo bash ./nobrand。"
   if [[ -e "$SHORTCUT_PATH" || -L "$SHORTCUT_PATH" ]]; then
     local existing_target
     existing_target="$(readlink -f "$SHORTCUT_PATH" 2>/dev/null || true)"
-    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH already exists and is not managed by Ou-Mieru."
+    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH 已存在且不是由 Ou-Mieru 管理。"
   fi
   install -D -m 0755 "$SELF_PATH" "${INSTALL_DIR}/nobrand"
   [[ -L "$SHORTCUT_PATH" ]] || ln -s "${INSTALL_DIR}/nobrand" "$SHORTCUT_PATH"
@@ -271,7 +271,7 @@ check_shortcut_path() {
   if [[ -e "$SHORTCUT_PATH" || -L "$SHORTCUT_PATH" ]]; then
     local existing_target
     existing_target="$(readlink -f "$SHORTCUT_PATH" 2>/dev/null || true)"
-    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH already exists and is not managed by Ou-Mieru."
+    [[ "$existing_target" == "${INSTALL_DIR}/nobrand" ]] || die "$SHORTCUT_PATH 已存在且不是由 Ou-Mieru 管理。"
   fi
 }
 
@@ -288,7 +288,7 @@ EOF
 }
 
 load_state() {
-  [[ -r "$STATE_FILE" ]] || die 'No Ou-Mieru deployment metadata found on this host.'
+  [[ -r "$STATE_FILE" ]] || die '本机没有找到 Ou-Mieru 部署信息。'
   # State values are written by this script after strict token validation.
   # shellcheck disable=SC1090
   . "$STATE_FILE"
@@ -302,10 +302,10 @@ mieru_uri() {
 print_protocol() {
   cat <<EOF
 
-Mieru URI:
+Mieru 协议链接：
 $(mieru_uri)
 
-Clash / mihomo YAML:
+通用 YAML 配置：
 proxies:
   - name: $NODE_NAME
     type: mieru
@@ -322,16 +322,16 @@ EOF
 
 verify() {
   local status=0
-  say 'Verification:'
+  say '正在验收：'
   if ss -H -lnt "sport = :$PORT" | grep -q .; then
-    say "  PASS: Mieru is listening on TCP $PORT."
+    say "  通过：Mieru 正在监听 TCP $PORT。"
   else
-    warn "Mieru is not listening on TCP $PORT."
+    warn "Mieru 没有监听 TCP $PORT。"
     status=1
   fi
-  say "  Congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
-  say "  Default qdisc: $(sysctl -n net.core.default_qdisc)"
-  say "  TCP auto-tuning maximum: $(sysctl -n net.core.rmem_max) bytes"
+  say "  拥塞控制：$(sysctl -n net.ipv4.tcp_congestion_control)"
+  say "  默认队列规则：$(sysctl -n net.core.default_qdisc)"
+  say "  TCP 自动缓冲上限：$(sysctl -n net.core.rmem_max) 字节"
   install-mita doctor || status=1
   return "$status"
 }
@@ -345,8 +345,8 @@ run_install() {
   check_shortcut_path
 
   if ((DRY_RUN)); then
-    say "Dry run: would install Mieru on TCP $PORT and advertise $ENTRY_HOST:$ENTRY_PORT."
-    say 'Dry run: would apply FQ and a 64 MiB TCP auto-tuning maximum.'
+    say "演练模式：将安装监听 TCP $PORT、入口为 $ENTRY_HOST:$ENTRY_PORT 的 Mieru。"
+    say '演练模式：将应用 FQ 和 64 MiB TCP 自动缓冲上限。'
     return 0
   fi
 
@@ -358,8 +358,8 @@ run_install() {
   verify
   banner
   print_protocol
-  say "Use 'nobrand show' to view this protocol again."
-  say "The provider L4 entry ($ENTRY_HOST:$ENTRY_PORT) must already forward to this VPS."
+  say '再次查看协议请运行：nobrand show。'
+  say "请确认服务商 L4 入口（$ENTRY_HOST:$ENTRY_PORT）已转发到本机。"
 }
 
 show_protocol() {
@@ -370,7 +370,7 @@ show_protocol() {
   if command -v install-mita >/dev/null 2>&1; then
     install-mita status
   else
-    warn 'Mieru OneClick is not installed, although Ou-Mieru metadata remains.'
+    warn '未检测到 Mieru 安装器，但 Ou-Mieru 的部署信息仍保留。'
   fi
 }
 
@@ -386,16 +386,16 @@ run_uninstall() {
 
   if (( ! assume_yes )); then
     banner
-    printf 'This removes Mieru and the Ou-Mieru managed TCP tuning. Continue? [y/N] '
+    printf '将卸载 Mieru，并删除 Ou-Mieru 管理的 TCP 调优。继续吗？[y/N] '
     local answer
     read -r answer
-    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { say 'Cancelled.'; return 0; }
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { say '已取消。'; return 0; }
   fi
 
   if command -v install-mita >/dev/null 2>&1; then
     install-mita --uninstall --yes
   else
-    warn 'install-mita is already absent; removing Ou-Mieru files only.'
+    warn '未检测到 install-mita，将只删除 Ou-Mieru 文件。'
   fi
 
   if [[ -n "${TUNING_BACKUP:-}" && -f "$TUNING_BACKUP" ]]; then
@@ -410,8 +410,8 @@ run_uninstall() {
   rmdir "$STATE_DIR" 2>/dev/null || true
   rmdir "$INSTALL_DIR" 2>/dev/null || true
 
-  say 'Mieru and Ou-Mieru managed files were removed.'
-  say 'The current FQ qdisc remains active until the next reboot or network-device recreation.'
+  say '已卸载 Mieru 并删除 Ou-Mieru 管理的文件。'
+  say '当前 FQ 队列规则会保留到下次重启或网卡重新创建。'
 }
 
 interactive_install() {
@@ -440,7 +440,7 @@ EOF
     printf '端口必须是 1025 到 65535 的整数。\n' >&2
   done
   while :; do
-    read -r -p '第 2 步，填写“移动入口 (China Mobile)”IP：' entry_host
+    read -r -p '第 2 步，填写移动入口 (China Mobile) IP：' entry_host
     is_safe_host "$entry_host" && break
     printf '请输入 IPv4 地址或域名，不能包含空格。\n' >&2
   done
@@ -456,12 +456,12 @@ menu() {
   require_root
   banner
   cat <<'EOF'
-  1) One-click install Mieru
-  2) View Mieru protocol
-  3) One-click uninstall
-  0) Exit
+  1) 一键安装 Mieru
+  2) 查看 Mieru 协议
+  3) 一键卸载
+  0) 退出
 EOF
-  printf '\nSelect [0-3]: '
+  printf '\n请选择 [0-3]：'
   local selection
   read -r selection
   case "$selection" in
@@ -469,7 +469,7 @@ EOF
     2) show_protocol ;;
     3) run_uninstall ;;
     0) exit 0 ;;
-    *) die 'Invalid selection.' ;;
+    *) die '无效的选项。' ;;
   esac
 }
 
@@ -480,15 +480,15 @@ main() {
     install)
       shift; run_install "$@" ;;
     show)
-      shift; (($# == 0)) || die 'show does not accept options.'; show_protocol ;;
+      shift; (($# == 0)) || die 'show 不接受额外选项。'; show_protocol ;;
     uninstall)
-      shift; (($# == 0 || ($# == 1 && "$1" == '--yes'))) || die 'Use uninstall or uninstall --yes.'; run_uninstall "${1:-}" ;;
+      shift; (($# == 0 || ($# == 1 && "$1" == '--yes'))) || die '请使用 uninstall 或 uninstall --yes。'; run_uninstall "${1:-}" ;;
     -h|--help|help)
       banner; usage ;;
     --*)
       run_install "$@" ;;
     *)
-      die "Unknown command: $1" ;;
+      die "未知命令：$1" ;;
   esac
 }
 
