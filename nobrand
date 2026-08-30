@@ -259,8 +259,9 @@ install_mieru() {
   "mtu": 1400
 }
 EOF
-  mita apply config "$CONFIG_FILE" >/dev/null || die 'Mieru 配置写入失败。'
   systemctl enable --now mita.service >/dev/null 2>&1 || die 'Mieru 服务启动失败。'
+  mita apply config "$CONFIG_FILE" >/dev/null || die 'Mieru 配置写入失败。'
+  mita start >/dev/null || die 'Mieru 代理启动失败。'
 }
 
 prepare_existing_install() {
@@ -354,8 +355,12 @@ EOF
 }
 
 verify() {
-  local status=0
+  local status=0 _
   say '正在验收：'
+  for _ in {1..10}; do
+    ss -H -lnt "sport = :$PORT" | grep -q . && break
+    sleep 1
+  done
   if ss -H -lnt "sport = :$PORT" | grep -q .; then
     say "  通过：Mieru 正在监听 TCP $PORT。"
   else
@@ -457,7 +462,7 @@ interactive_install() {
     printf '端口必须是 1025 到 65535 的整数。\n' >&2
   done
   while :; do
-    read -r -p '第 2 步，填写移动入口【专线网卡 · 移动入口 (China Mobile)】：' entry_host
+    read -r -p '第 2 步，填写移动入口【专线网卡 · 移动入口 (China Mobile)；不要填写外部连接 IP】：' entry_host
     is_safe_host "$entry_host" && break
     printf '请输入 IPv4 地址或域名，不能包含空格。\n' >&2
   done
