@@ -20,7 +20,7 @@ chmod +x nobrand
 sudo ./nobrand
 ```
 
-选择菜单 `1` 后，脚本会逐步提示你从服务商面板的“网络信息”复制哪一项，不需要自己猜网络拓扑。安装完成后会自动创建全局快捷命令：
+选择菜单 `1` 后，脚本会逐步提示你从 Nobrand 控制台 VPS“详情”区域复制哪一项，不需要自己猜网络拓扑。安装完成后会自动创建全局快捷命令：
 
 ```bash
 sudo nobrand
@@ -44,7 +44,7 @@ sudo nobrand
 
 ## 需要从面板填写的字段
 
-进入服务商控制台，找到 VPS 的“网络信息”：
+进入 Nobrand 控制台，打开 VPS 的“详情”区域：
 
 | 面板字段 | 在脚本中如何填写 |
 | --- | --- |
@@ -69,7 +69,7 @@ sudo nobrand
 
 ## 功能
 
-- **一键安装 Mieru**：TCP + IPLC 预设，MTU 1400、关闭多路复用、No-Wait 握手。
+- **安装Mieru协议**：TCP + IPLC 预设，MTU 1400、关闭多路复用、No-Wait 握手。
 - **输出通用配置**：打印标准 `mieru://` URI 和 Clash/mihomo YAML。
 - **网络调优**：启用内核实际提供的 BBR、即时应用 `fq`，TCP 自动缓冲最高 64MiB。
 - **查看协议**：执行 `nobrand show` 或菜单第二项，重新显示 URI、YAML 和服务状态。
@@ -79,7 +79,7 @@ sudo nobrand
 ## 菜单与命令
 
 ```text
-1) 一键安装 Mieru
+1) 安装Mieru协议
 2) 查看 Mieru 协议
 3) 一键卸载
 0) 退出
@@ -110,7 +110,10 @@ sudo ./nobrand install \
 | `--entry-port` | 客户端连接的入口端口；不填时和 `--port` 相同。 |
 | `--name` | 节点名称。 |
 | `--user` / `--password` | 自定义 Mieru 凭据；默认随机生成。 |
+| `--reinstall` | 已有 Mieru 时先卸载旧实例，再重新安装。 |
 | `--dry-run` | 校验参数与本机环境，不执行写入。 |
+
+入口端口是服务商移动入口 IP 对外提供的端口；`--port` 是日本 VPS 上 Mieru 实际监听的端口。多数 Nobrand Dual 端口映射是一一对应的，入口端口和本机端口相同，交互式安装时直接回车即可。只有服务商明确给出不同的外部端口时，才填写第 3 步的入口端口。
 
 ## 关于 BBRv3、FQ 与 64MiB 缓冲
 
